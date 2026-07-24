@@ -1,0 +1,69 @@
+{
+  "id": "panos",
+  "name": "Palo Alto PAN-OS",
+  "name_en": "Palo Alto PAN-OS",
+  "version": "1.0.0",
+  "description": "Administración de un firewall Palo Alto PAN-OS: consultar reglas de seguridad, agregar un objeto de dirección y confirmar (commit) los cambios",
+  "description_en": "Palo Alto PAN-OS firewall administration: check security rules, add an address object and commit changes",
+  "icon": "icon.svg",
+  "category": "security",
+  "category_en": "security",
+  "keywords": ["palo alto", "pan-os", "panos", "firewall", "ciberseguridad", "cybersecurity", "reglas", "rules", "commit"],
+  "library": {
+    "package": "ruvic-panos-connector",
+    "install": "pip install git+https://github.com/Dgirto/Palo-Alto-PAN-OS.git#subdirectory=lib",
+    "import_name": "ruvic_panos_connector"
+  },
+  "auth_modes": [
+    {
+      "id": "api_key",
+      "label": "API Key",
+      "fields": [
+        {
+          "key": "base_url",
+          "label": "URL base del firewall/Panorama",
+          "type": "text",
+          "required": true,
+          "placeholder": "https://firewall.empresa.com"
+        },
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "type": "password",
+          "secret": true,
+          "required": true,
+          "help_text": "Genera la API Key con: GET /api/?type=keygen&user=USUARIO&password=CONTRASEÑA, usando una cuenta de administrador dedicada con rol personalizado (ver README)"
+        },
+        {
+          "key": "vsys",
+          "label": "VSYS",
+          "type": "text",
+          "required": false,
+          "default": "vsys1"
+        },
+        {
+          "key": "verify_ssl",
+          "label": "Verificar certificado TLS",
+          "type": "boolean",
+          "required": false,
+          "default": "true",
+          "help_text": "Desactívalo solo para firewalls con certificado autofirmado en entornos de prueba"
+        },
+        {
+          "key": "connect_timeout",
+          "label": "Timeout de conexión (segundos)",
+          "type": "number",
+          "required": false,
+          "default": "15"
+        }
+      ]
+    }
+  ],
+  "env_prefix": "RUVIC_PANOS_",
+  "operations": ["security.list_rules", "security.add_object", "security.commit"],
+  "test_connection": true,
+  "docs": {
+    "skill": "SKILL.md",
+    "permissions_note": "Crea un rol de administrador personalizado (Device → Admin Roles) con acceso 'Read Only' sobre Policies y 'Read-Write' únicamente sobre Objects → Addresses, además de permiso de Commit. No otorgues el rol 'Superuser' ni acceso de escritura sobre Policies, Network o Device Setup."
+  }
+}

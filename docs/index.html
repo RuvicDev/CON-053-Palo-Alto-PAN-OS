@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="doc_title">Conector Palo Alto PAN-OS — Ruvic</title>
+  <link rel="stylesheet" href="assets/ruvic.css">
+</head>
+<body>
+  <main class="ruvic-container">
+    <nav class="ruvic-toc" aria-label="Índice">
+      <h2 data-i18n="toc_title">Contenido</h2>
+      <ol>
+        <li><a href="#que-es" data-i18n="toc.que_es">¿Qué es y para qué sirve?</a></li>
+        <li><a href="#prerrequisitos" data-i18n="toc.prerrequisitos">Prerrequisitos</a></li>
+        <li><a href="#configuracion-fabricante" data-i18n="toc.configuracion_fabricante">Configuración en el fabricante</a></li>
+        <li><a href="#permisos" data-i18n="toc.permisos">Permisos requeridos</a></li>
+        <li><a href="#configuracion-ruvic" data-i18n="toc.configuracion_ruvic">Configuración en Ruvic</a></li>
+        <li><a href="#verificacion" data-i18n="toc.verificacion">Verificación</a></li>
+        <li><a href="#solucion-problemas" data-i18n="toc.solucion_problemas">Solución de problemas</a></li>
+        <li><a href="#faq-seguridad" data-i18n="toc.faq_seguridad">Preguntas frecuentes y notas de seguridad</a></li>
+      </ol>
+    </nav>
+
+    <h1 data-i18n="guide_title">Conector Palo Alto PAN-OS</h1>
+    <p class="guide-updated">{{ULTIMA_ACTUALIZACION}}</p>
+
+    <section>
+      <h2 id="que-es" data-i18n="section.que_es">¿Qué es y para qué sirve?</h2>
+      <p data-i18n="section.que_es.body1">El conector Palo Alto PAN-OS permite que el agente de Ruvic administre un firewall Palo Alto (o Panorama) mediante su API: consultar reglas de seguridad, agregar objetos de dirección y confirmar (commit) los cambios de configuración pendientes. Combina la REST API (JSON) para reglas y objetos con la XML API clásica para el commit, ya que PAN-OS no expone un endpoint REST equivalente.</p>
+      <p data-i18n="section.que_es.body2">Una vez configurado, puedes pedirle al agente cosas como:</p>
+      <ul>
+        <li data-i18n="section.que_es.example1">"Lista las reglas de seguridad del vsys1 y dime cuáles permiten tráfico desde internet."</li>
+        <li data-i18n="section.que_es.example2">"Agrega un objeto de dirección para el servidor 10.0.0.5/32 y confírmalo."</li>
+        <li data-i18n="section.que_es.example3">"¿Qué reglas usan el objeto servidor-web?"</li>
+      </ul>
+      <p data-i18n="section.que_es.body3">Operaciones soportadas:</p>
+      <table>
+        <thead>
+          <tr>
+            <th data-i18n="table.operacion">Operación</th>
+            <th data-i18n="table.que_hace">Qué hace</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>security.list_rules</code></td>
+            <td data-i18n="section.que_es.op1">Lista las reglas de seguridad del vsys configurado (solo lectura)</td>
+          </tr>
+          <tr>
+            <td><code>security.add_object</code></td>
+            <td data-i18n="section.que_es.op2">Agrega un objeto de dirección a la configuración candidata (no aplica cambios hasta el commit)</td>
+          </tr>
+          <tr>
+            <td><code>security.commit</code></td>
+            <td data-i18n="section.que_es.op3">Confirma (commit) los cambios pendientes en la configuración activa del firewall</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout callout-warning">
+        <span class="callout-title" data-i18n="section.que_es.callout_title">Este conector hace cambios reales</span>
+        <span data-i18n="section.que_es.callout_body">A diferencia de un conector de solo lectura, <code>add_object</code> y <code>commit</code> modifican la configuración del firewall. Un <code>commit</code> aplica los cambios a la configuración activa y puede afectar tráfico real de producción. El conector no crea, modifica ni elimina reglas de seguridad — solo objetos de dirección y el commit de cambios ya presentes en la configuración candidata.</span>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="prerrequisitos" data-i18n="section.prerrequisitos">Prerrequisitos</h2>
+      <ul>
+        <li data-i18n="section.prerrequisitos.item1">Un firewall <strong>Palo Alto PAN-OS</strong> (o Panorama) accesible por HTTPS, con PAN-OS 10.1 o superior recomendado.</li>
+        <li data-i18n="section.prerrequisitos.item2">Acceso administrativo al firewall (<code>Device → Admin Roles</code> y <code>Device → Administrators</code>) para crear un rol y una cuenta dedicada, solo durante la configuración inicial.</li>
+        <li data-i18n="section.prerrequisitos.item3"><strong>Acceso de red</strong> desde la plataforma Ruvic hacia la interfaz de administración del firewall (puerto 443 alcanzable; regla de firewall si aplica).</li>
+        <li data-i18n="section.prerrequisitos.item4">La URL base del firewall o Panorama (ej. <code>https://firewall.empresa.com</code>) y, si aplica, el nombre del VSYS a administrar.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="configuracion-fabricante" data-i18n="section.configuracion_fabricante">Configuración en el fabricante</h2>
+      <p data-i18n="section.configuracion_fabricante.intro">Vas a crear un <strong>rol de administrador personalizado</strong> y una <strong>cuenta dedicada</strong> para Ruvic. No reutilices el administrador por defecto ni una cuenta con rol <code>Superuser</code>: una cuenta dedicada con permisos mínimos permite auditar la actividad del agente y limitar el impacto si la API Key se compromete.</p>
+
+      <ol class="ruvic-steps">
+        <li>
+          <strong data-i18n="step.1.label">Crea el rol de administrador personalizado.</strong>
+          <span data-i18n="step.1.body">Ve a <strong>Device → Admin Roles → Add</strong>. Crea un rol (por ejemplo <code>ruvic_panos_role</code>) de tipo XML API/REST API y ajusta los permisos exactamente así:</span>
+          <ul>
+            <li data-i18n="step.1.sub1"><strong>Read Only</strong> sobre <strong>Policies</strong> (necesario para <code>list_rules</code>).</li>
+            <li data-i18n="step.1.sub2"><strong>Read-Write</strong> únicamente sobre <strong>Objects → Addresses</strong> (necesario para <code>add_object</code>). Deja el resto de "Objects" sin acceso o solo lectura.</li>
+            <li data-i18n="step.1.sub3">Permiso de <strong>Commit</strong> habilitado (necesario para <code>commit</code>).</li>
+            <li data-i18n="step.1.sub4">Sin acceso de escritura sobre <strong>Network</strong>, <strong>Device Setup</strong> ni ningún otro apartado. Nunca uses el rol <strong>Superuser</strong>.</li>
+          </ul>
+          <div class="screenshot-placeholder" data-i18n="img.rol.placeholder">[ Captura: Device → Admin Roles con los permisos mínimos configurados — reemplazar por assets/img/panos-admin-role.png ]</div>
+        </li>
+
+        <li>
+          <strong data-i18n="step.2.label">Crea la cuenta de administrador dedicada.</strong>
+          <span data-i18n="step.2.body">Ve a <strong>Device → Administrators → Add</strong>, crea un usuario (por ejemplo <code>ruvic_admin</code>) con una contraseña fuerte (mínimo 16 caracteres, generada aleatoriamente) y asígnale el rol personalizado creado en el paso anterior como <strong>Administrator Type → Role Based</strong>.</span>
+        </li>
+
+        <li>
+          <strong data-i18n="step.3.label">Genera la API Key con el endpoint keygen.</strong>
+          <span data-i18n="step.3.body">Con la cuenta dedicada (no el admin por defecto), genera la API Key llamando al endpoint <code>keygen</code> de la XML API:</span>
+<pre><code>curl -k "https://firewall.empresa.com/api/?type=keygen&amp;user=ruvic_admin&amp;password=CAMBIA_ESTA_CONTRASEÑA"</code></pre>
+          <span data-i18n="step.3.body2">La respuesta incluye un elemento <code>&lt;key&gt;</code>: cópialo, lo usarás en el formulario de Ruvic (campo <em>API Key</em>). Guárdalo en un lugar seguro; no lo compartas ni lo pegues en canales sin cifrar.</span>
+        </li>
+
+        <li>
+          <strong data-i18n="step.4.label">Verifica la cuenta y la API Key.</strong>
+          <span data-i18n="step.4.body">Confirma que la API Key funciona y que el rol tiene los permisos esperados probando una llamada de solo lectura:</span>
+<pre><code>curl -k "https://firewall.empresa.com/api/?type=op&amp;cmd=&lt;show&gt;&lt;system&gt;&lt;info&gt;&lt;/info&gt;&lt;/system&gt;&lt;/show&gt;&amp;key=TU_API_KEY"</code></pre>
+          <span data-i18n="step.4.body2">Si responde con información del sistema (sin error de autenticación), el fabricante quedó listo. Anota la URL base, la API Key y el VSYS para la siguiente sección.</span>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2 id="permisos" data-i18n="section.permisos">Permisos requeridos</h2>
+      <p data-i18n="section.permisos.intro">Principio de mínimo privilegio: la cuenta de Ruvic solo necesita estos permisos. No otorgues el rol <code>Superuser</code> ni acceso de escritura sobre <code>Policies</code>, <code>Network</code> o <code>Device Setup</code>.</p>
+      <table>
+        <thead>
+          <tr>
+            <th data-i18n="table.permiso">Permiso</th>
+            <th data-i18n="table.para_que">Para qué sirve</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-i18n="permisos.row1.permiso"><strong>Policies</strong> — Read Only</td>
+            <td data-i18n="permisos.row1.para_que">Consultar las reglas de seguridad (<code>list_rules</code>). No permite crear, modificar ni eliminar reglas.</td>
+          </tr>
+          <tr>
+            <td data-i18n="permisos.row2.permiso"><strong>Objects → Addresses</strong> — Read-Write</td>
+            <td data-i18n="permisos.row2.para_que">Crear objetos de dirección en la configuración candidata (<code>add_object</code>). No se otorga escritura sobre otros tipos de objetos.</td>
+          </tr>
+          <tr>
+            <td data-i18n="permisos.row3.permiso"><strong>Commit</strong></td>
+            <td data-i18n="permisos.row3.para_que">Aplicar la configuración candidata a la configuración activa del firewall (<code>commit</code>).</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout callout-warning">
+        <span class="callout-title" data-i18n="permisos.callout_title">Nunca otorgues Superuser</span>
+        <span data-i18n="permisos.callout_body">El rol <code>Superuser</code> (o cualquier rol con acceso de escritura sobre Network o Device Setup) le daría a la API Key la capacidad de reconfigurar interfaces, rutas o el propio firewall — muy por encima de lo que el conector necesita. Si el rol tiene más permisos de los listados aquí, redúcelo antes de continuar.</span>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="configuracion-ruvic" data-i18n="section.configuracion_ruvic">Configuración en Ruvic</h2>
+      <p data-i18n="section.configuracion_ruvic.intro">Entra a <strong>Settings → Conectores</strong>, busca la tarjeta <strong>Palo Alto PAN-OS</strong> y pulsa <strong>Configurar</strong>. Diligencia el formulario con los valores que obtuviste en la sección anterior:</p>
+      <table>
+        <thead>
+          <tr>
+            <th data-i18n="table.campo">Campo</th>
+            <th data-i18n="table.descripcion">Descripción</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>base_url</code></td>
+            <td data-i18n="ruvic.field.base_url">URL base del firewall o Panorama, incluyendo <code>https://</code> (ej. <code>https://firewall.empresa.com</code>). Obligatorio.</td>
+          </tr>
+          <tr>
+            <td><code>api_key</code></td>
+            <td data-i18n="ruvic.field.api_key">API Key generada en el paso 3 de la configuración en el fabricante, con la cuenta dedicada <code>ruvic_admin</code>. Se almacena cifrada. Obligatorio.</td>
+          </tr>
+          <tr>
+            <td><code>vsys</code></td>
+            <td data-i18n="ruvic.field.vsys">VSYS a administrar. Opcional; por defecto <code>vsys1</code>. Cámbialo si tu firewall usa sistemas virtuales múltiples y quieres limitar el conector a uno específico.</td>
+          </tr>
+          <tr>
+            <td><code>verify_ssl</code></td>
+            <td data-i18n="ruvic.field.verify_ssl">Verificar el certificado TLS del firewall. Opcional; por defecto activado (<code>true</code>). Desactívalo únicamente en pruebas contra un firewall con certificado autofirmado en un entorno de laboratorio — nunca en producción, ya que deshabilita la validación del servidor y expone la conexión a ataques de intermediario.</td>
+          </tr>
+          <tr>
+            <td><code>connect_timeout</code></td>
+            <td data-i18n="ruvic.field.connect_timeout">Timeout de conexión en segundos. Opcional; por defecto <code>15</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p data-i18n="section.configuracion_ruvic.save">Guarda el formulario. Ruvic ejecuta automáticamente una prueba de conexión (equivalente a un ping contra la API) y confirma si la configuración es válida.</p>
+    </section>
+
+    <section>
+      <h2 id="verificacion" data-i18n="section.verificacion">Verificación</h2>
+      <ol class="ruvic-steps">
+        <li>
+          <strong data-i18n="verif.1.label">Prueba de conexión automática.</strong>
+          <span data-i18n="verif.1.body">Al guardar la configuración, Ruvic consulta la información del sistema del firewall usando la API Key ingresada. Si la tarjeta del conector pasa a estado <strong>Configurado</strong>, la conexión y las credenciales son válidas.</span>
+        </li>
+        <li>
+          <strong data-i18n="verif.2.label">Prueba con el agente.</strong>
+          <span data-i18n="verif.2.body">Pídele al agente algo simple y de solo lectura, por ejemplo: <em>"Lista las reglas de seguridad del firewall"</em>. Si el agente responde con la lista de reglas (nombre, acción, origen/destino), el conector funciona de extremo a extremo.</span>
+        </li>
+        <li>
+          <strong data-i18n="verif.3.label">Prueba opcional de escritura (con precaución).</strong>
+          <span data-i18n="verif.3.body">Solo si quieres validar el flujo completo: pide al agente crear un objeto de dirección de prueba y confírmale que confirme (commit) el cambio explícitamente. Recuerda que el commit afecta la configuración activa; hazlo en un firewall de laboratorio si es posible.</span>
+        </li>
+      </ol>
+      <div class="callout callout-info">
+        <span class="callout-title" data-i18n="verif.callout_title">Qué esperar en cada operación</span>
+        <span data-i18n="verif.callout_body"><code>list_rules</code> es inmediato y de solo lectura. <code>add_object</code> modifica la configuración candidata sin efecto inmediato. <code>commit</code> puede tardar hasta 2 minutos: el conector sondea el estado del job cada 3 segundos y retorna el resultado final (<code>OK</code> o <code>FAIL</code>).</span>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="solucion-problemas" data-i18n="section.solucion_problemas">Solución de problemas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th data-i18n="table.problema">Problema</th>
+            <th data-i18n="table.causa_solucion">Causa probable y solución</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-i18n="trouble.row1.problema">API Key inválida o permiso insuficiente (código 403 / 16)</td>
+            <td data-i18n="trouble.row1.solucion">La API Key es incorrecta, expiró, o el rol de la cuenta no tiene los permisos mínimos (Policies Read Only, Objects → Addresses Read-Write, Commit). Regenera la API Key con <code>keygen</code> y revisa el rol en <strong>Device → Admin Roles</strong>.</td>
+          </tr>
+          <tr>
+            <td data-i18n="trouble.row2.problema">Timeout de red / no se pudo alcanzar el firewall</td>
+            <td data-i18n="trouble.row2.solucion">La plataforma Ruvic no puede llegar a la <code>base_url</code> por el puerto 443. Verifica reglas de firewall, que la interfaz de administración esté habilitada para HTTPS, y aumenta <code>connect_timeout</code> si la red es lenta.</td>
+          </tr>
+          <tr>
+            <td data-i18n="trouble.row3.problema">El commit falla o retorna <code>FAIL</code></td>
+            <td data-i18n="trouble.row3.solucion">Puede haber un error de validación en la configuración candidata, otro commit en curso, o la cuenta no tiene permiso de Commit. Revisa el detalle del job en <strong>Task Manager</strong> del firewall y confirma el permiso de Commit del rol.</td>
+          </tr>
+          <tr>
+            <td data-i18n="trouble.row4.problema">La tarjeta queda en "Sin configurar" después de guardar</td>
+            <td data-i18n="trouble.row4.solucion">La prueba de conexión automática falló. Revisa que <code>base_url</code> incluya <code>https://</code>, que la API Key se haya copiado completa (sin espacios) y que <code>verify_ssl</code> coincida con el tipo de certificado del firewall (desactívalo solo si es autofirmado y estás en pruebas).</td>
+          </tr>
+          <tr>
+            <td data-i18n="trouble.row5.problema">Respuesta XML inválida o inesperada de PAN-OS</td>
+            <td data-i18n="trouble.row5.solucion">Suele indicar una versión de PAN-OS distinta a la esperada (REST API v10.1) o un proxy/balanceador modificando la respuesta. Verifica la versión de PAN-OS y que la <code>base_url</code> apunte directamente al firewall o Panorama, no a un proxy intermedio.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2 id="faq-seguridad" data-i18n="section.faq_seguridad">Preguntas frecuentes y notas de seguridad</h2>
+
+      <h3 data-i18n="faq.q1">¿Dónde se guarda la API Key?</h3>
+      <p data-i18n="faq.a1">La API Key se almacena cifrada en la plataforma Ruvic y nunca se muestra en texto plano después de guardarla, ni se registra en logs. El conector la lee únicamente desde la variable de entorno <code>RUVIC_PANOS_API_KEY</code> en tiempo de ejecución.</p>
+
+      <h3 data-i18n="faq.q2">¿Con qué frecuencia debo rotar la API Key?</h3>
+      <p data-i18n="faq.a2">Se recomienda rotarla cada 90 días, o inmediatamente si sospechas que se expuso. Genera una nueva con <code>keygen</code> usando la cuenta <code>ruvic_admin</code> y actualízala en el formulario de configuración; la anterior deja de funcionar en cuanto la cuenta genera una nueva clave.</p>
+
+      <h3 data-i18n="faq.q3">Sospecho que la API Key se comprometió, ¿qué hago?</h3>
+      <p data-i18n="faq.a3">Revoca el acceso deshabilitando o eliminando la cuenta <code>ruvic_admin</code> en <strong>Device → Administrators</strong> del firewall, genera una nueva cuenta y API Key, actualiza la configuración en Ruvic, y revisa el historial de commits y el log de auditoría del firewall en busca de cambios no reconocidos.</p>
+
+      <h3 data-i18n="faq.q4">¿Por qué nunca se otorga el rol Superuser?</h3>
+      <p data-i18n="faq.a4">El conector solo necesita leer reglas, escribir objetos de dirección y confirmar cambios. El rol <code>Superuser</code> otorgaría control total del firewall (interfaces, rutas, VPNs, usuarios, etc.), muy por encima de lo necesario. Si la API Key se filtrara, un rol personalizado con permisos mínimos limita drásticamente el daño posible frente a una cuenta Superuser comprometida.</p>
+
+      <h3 data-i18n="faq.q5">¿El conector puede crear o modificar reglas de seguridad?</h3>
+      <p data-i18n="faq.a5">No. El conector solo lee reglas de seguridad, crea objetos de dirección y confirma (commit) cambios ya presentes en la configuración candidata. No expone ninguna operación para crear, modificar o eliminar reglas.</p>
+
+      <div class="callout callout-warning">
+        <span class="callout-title" data-i18n="faq.callout_title">add_object y commit hacen cambios reales</span>
+        <span data-i18n="faq.callout_body">A diferencia de una simple consulta, <code>add_object</code> modifica la configuración candidata del firewall y <code>commit</code> la aplica a la configuración activa, afectando tráfico real de producción. Confirma siempre con el equipo responsable antes de pedirle al agente que haga commit, especialmente en firewalls de producción.</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const I18N = {
+      es: {
+        doc_title: "Conector Palo Alto PAN-OS — Ruvic",
+        toc_title: "Contenido",
+        "toc.que_es": "¿Qué es y para qué sirve?",
+        "toc.prerrequisitos": "Prerrequisitos",
+        "toc.configuracion_fabricante": "Configuración en el fabricante",
+        "toc.permisos": "Permisos requeridos",
+        "toc.configuracion_ruvic": "Configuración en Ruvic",
+        "toc.verificacion": "Verificación",
+        "toc.solucion_problemas": "Solución de problemas",
+        "toc.faq_seguridad": "Preguntas frecuentes y notas de seguridad",
+        guide_title: "Conector Palo Alto PAN-OS",
+        "section.que_es": "¿Qué es y para qué sirve?",
+        "section.que_es.body1": "El conector Palo Alto PAN-OS permite que el agente de Ruvic administre un firewall Palo Alto (o Panorama) mediante su API: consultar reglas de seguridad, agregar objetos de dirección y confirmar (commit) los cambios de configuración pendientes. Combina la REST API (JSON) para reglas y objetos con la XML API clásica para el commit, ya que PAN-OS no expone un endpoint REST equivalente.",
+        "section.que_es.body2": "Una vez configurado, puedes pedirle al agente cosas como:",
+        "section.que_es.example1": "\"Lista las reglas de seguridad del vsys1 y dime cuáles permiten tráfico desde internet.\"",
+        "section.que_es.example2": "\"Agrega un objeto de dirección para el servidor 10.0.0.5/32 y confírmalo.\"",
+        "section.que_es.example3": "\"¿Qué reglas usan el objeto servidor-web?\"",
+        "section.que_es.body3": "Operaciones soportadas:",
+        "table.operacion": "Operación",
+        "table.que_hace": "Qué hace",
+        "section.que_es.op1": "Lista las reglas de seguridad del vsys configurado (solo lectura)",
+        "section.que_es.op2": "Agrega un objeto de dirección a la configuración candidata (no aplica cambios hasta el commit)",
+        "section.que_es.op3": "Confirma (commit) los cambios pendientes en la configuración activa del firewall",
+        "section.que_es.callout_title": "Este conector hace cambios reales",
+        "section.que_es.callout_body": "A diferencia de un conector de solo lectura, add_object y commit modifican la configuración del firewall. Un commit aplica los cambios a la configuración activa y puede afectar tráfico real de producción. El conector no crea, modifica ni elimina reglas de seguridad — solo objetos de dirección y el commit de cambios ya presentes en la configuración candidata.",
+        "section.prerrequisitos": "Prerrequisitos",
+        "section.prerrequisitos.item1": "Un firewall Palo Alto PAN-OS (o Panorama) accesible por HTTPS, con PAN-OS 10.1 o superior recomendado.",
+        "section.prerrequisitos.item2": "Acceso administrativo al firewall (Device → Admin Roles y Device → Administrators) para crear un rol y una cuenta dedicada, solo durante la configuración inicial.",
+        "section.prerrequisitos.item3": "Acceso de red desde la plataforma Ruvic hacia la interfaz de administración del firewall (puerto 443 alcanzable; regla de firewall si aplica).",
+        "section.prerrequisitos.item4": "La URL base del firewall o Panorama (ej. https://firewall.empresa.com) y, si aplica, el nombre del VSYS a administrar.",
+        "section.configuracion_fabricante": "Configuración en el fabricante",
+        "section.configuracion_fabricante.intro": "Vas a crear un rol de administrador personalizado y una cuenta dedicada para Ruvic. No reutilices el administrador por defecto ni una cuenta con rol Superuser: una cuenta dedicada con permisos mínimos permite auditar la actividad del agente y limitar el impacto si la API Key se compromete.",
+        "step.1.label": "Crea el rol de administrador personalizado.",
+        "step.1.body": "Ve a Device → Admin Roles → Add. Crea un rol (por ejemplo ruvic_panos_role) de tipo XML API/REST API y ajusta los permisos exactamente así:",
+        "step.1.sub1": "Read Only sobre Policies (necesario para list_rules).",
+        "step.1.sub2": "Read-Write únicamente sobre Objects → Addresses (necesario para add_object). Deja el resto de \"Objects\" sin acceso o solo lectura.",
+        "step.1.sub3": "Permiso de Commit habilitado (necesario para commit).",
+        "step.1.sub4": "Sin acceso de escritura sobre Network, Device Setup ni ningún otro apartado. Nunca uses el rol Superuser.",
+        "img.rol.placeholder": "[ Captura: Device → Admin Roles con los permisos mínimos configurados — reemplazar por assets/img/panos-admin-role.png ]",
+        "step.2.label": "Crea la cuenta de administrador dedicada.",
+        "step.2.body": "Ve a Device → Administrators → Add, crea un usuario (por ejemplo ruvic_admin) con una contraseña fuerte (mínimo 16 caracteres, generada aleatoriamente) y asígnale el rol personalizado creado en el paso anterior como Administrator Type → Role Based.",
+        "step.3.label": "Genera la API Key con el endpoint keygen.",
+        "step.3.body": "Con la cuenta dedicada (no el admin por defecto), genera la API Key llamando al endpoint keygen de la XML API:",
+        "step.3.body2": "La respuesta incluye un elemento <key>: cópialo, lo usarás en el formulario de Ruvic (campo API Key). Guárdalo en un lugar seguro; no lo compartas ni lo pegues en canales sin cifrar.",
+        "step.4.label": "Verifica la cuenta y la API Key.",
+        "step.4.body": "Confirma que la API Key funciona y que el rol tiene los permisos esperados probando una llamada de solo lectura:",
+        "step.4.body2": "Si responde con información del sistema (sin error de autenticación), el fabricante quedó listo. Anota la URL base, la API Key y el VSYS para la siguiente sección.",
+        "section.permisos": "Permisos requeridos",
+        "section.permisos.intro": "Principio de mínimo privilegio: la cuenta de Ruvic solo necesita estos permisos. No otorgues el rol Superuser ni acceso de escritura sobre Policies, Network o Device Setup.",
+        "table.permiso": "Permiso",
+        "table.para_que": "Para qué sirve",
+        "permisos.row1.permiso": "Policies — Read Only",
+        "permisos.row1.para_que": "Consultar las reglas de seguridad (list_rules). No permite crear, modificar ni eliminar reglas.",
+        "permisos.row2.permiso": "Objects → Addresses — Read-Write",
+        "permisos.row2.para_que": "Crear objetos de dirección en la configuración candidata (add_object). No se otorga escritura sobre otros tipos de objetos.",
+        "permisos.row3.permiso": "Commit",
+        "permisos.row3.para_que": "Aplicar la configuración candidata a la configuración activa del firewall (commit).",
+        "permisos.callout_title": "Nunca otorgues Superuser",
+        "permisos.callout_body": "El rol Superuser (o cualquier rol con acceso de escritura sobre Network o Device Setup) le daría a la API Key la capacidad de reconfigurar interfaces, rutas o el propio firewall — muy por encima de lo que el conector necesita. Si el rol tiene más permisos de los listados aquí, redúcelo antes de continuar.",
+        "section.configuracion_ruvic": "Configuración en Ruvic",
+        "section.configuracion_ruvic.intro": "Entra a Settings → Conectores, busca la tarjeta Palo Alto PAN-OS y pulsa Configurar. Diligencia el formulario con los valores que obtuviste en la sección anterior:",
+        "table.campo": "Campo",
+        "table.descripcion": "Descripción",
+        "ruvic.field.base_url": "URL base del firewall o Panorama, incluyendo https:// (ej. https://firewall.empresa.com). Obligatorio.",
+        "ruvic.field.api_key": "API Key generada en el paso 3 de la configuración en el fabricante, con la cuenta dedicada ruvic_admin. Se almacena cifrada. Obligatorio.",
+        "ruvic.field.vsys": "VSYS a administrar. Opcional; por defecto vsys1. Cámbialo si tu firewall usa sistemas virtuales múltiples y quieres limitar el conector a uno específico.",
+        "ruvic.field.verify_ssl": "Verificar el certificado TLS del firewall. Opcional; por defecto activado (true). Desactívalo únicamente en pruebas contra un firewall con certificado autofirmado en un entorno de laboratorio — nunca en producción, ya que deshabilita la validación del servidor y expone la conexión a ataques de intermediario.",
+        "ruvic.field.connect_timeout": "Timeout de conexión en segundos. Opcional; por defecto 15.",
+        "section.configuracion_ruvic.save": "Guarda el formulario. Ruvic ejecuta automáticamente una prueba de conexión (equivalente a un ping contra la API) y confirma si la configuración es válida.",
+        "section.verificacion": "Verificación",
+        "verif.1.label": "Prueba de conexión automática.",
+        "verif.1.body": "Al guardar la configuración, Ruvic consulta la información del sistema del firewall usando la API Key ingresada. Si la tarjeta del conector pasa a estado Configurado, la conexión y las credenciales son válidas.",
+        "verif.2.label": "Prueba con el agente.",
+        "verif.2.body": "Pídele al agente algo simple y de solo lectura, por ejemplo: \"Lista las reglas de seguridad del firewall\". Si el agente responde con la lista de reglas (nombre, acción, origen/destino), el conector funciona de extremo a extremo.",
+        "verif.3.label": "Prueba opcional de escritura (con precaución).",
+        "verif.3.body": "Solo si quieres validar el flujo completo: pide al agente crear un objeto de dirección de prueba y confírmale que confirme (commit) el cambio explícitamente. Recuerda que el commit afecta la configuración activa; hazlo en un firewall de laboratorio si es posible.",
+        "verif.callout_title": "Qué esperar en cada operación",
+        "verif.callout_body": "list_rules es inmediato y de solo lectura. add_object modifica la configuración candidata sin efecto inmediato. commit puede tardar hasta 2 minutos: el conector sondea el estado del job cada 3 segundos y retorna el resultado final (OK o FAIL).",
+        "section.solucion_problemas": "Solución de problemas",
+        "table.problema": "Problema",
+        "table.causa_solucion": "Causa probable y solución",
+        "trouble.row1.problema": "API Key inválida o permiso insuficiente (código 403 / 16)",
+        "trouble.row1.solucion": "La API Key es incorrecta, expiró, o el rol de la cuenta no tiene los permisos mínimos (Policies Read Only, Objects → Addresses Read-Write, Commit). Regenera la API Key con keygen y revisa el rol en Device → Admin Roles.",
+        "trouble.row2.problema": "Timeout de red / no se pudo alcanzar el firewall",
+        "trouble.row2.solucion": "La plataforma Ruvic no puede llegar a la base_url por el puerto 443. Verifica reglas de firewall, que la interfaz de administración esté habilitada para HTTPS, y aumenta connect_timeout si la red es lenta.",
+        "trouble.row3.problema": "El commit falla o retorna FAIL",
+        "trouble.row3.solucion": "Puede haber un error de validación en la configuración candidata, otro commit en curso, o la cuenta no tiene permiso de Commit. Revisa el detalle del job en Task Manager del firewall y confirma el permiso de Commit del rol.",
+        "trouble.row4.problema": "La tarjeta queda en \"Sin configurar\" después de guardar",
+        "trouble.row4.solucion": "La prueba de conexión automática falló. Revisa que base_url incluya https://, que la API Key se haya copiado completa (sin espacios) y que verify_ssl coincida con el tipo de certificado del firewall (desactívalo solo si es autofirmado y estás en pruebas).",
+        "trouble.row5.problema": "Respuesta XML inválida o inesperada de PAN-OS",
+        "trouble.row5.solucion": "Suele indicar una versión de PAN-OS distinta a la esperada (REST API v10.1) o un proxy/balanceador modificando la respuesta. Verifica la versión de PAN-OS y que la base_url apunte directamente al firewall o Panorama, no a un proxy intermedio.",
+        "section.faq_seguridad": "Preguntas frecuentes y notas de seguridad",
+        "faq.q1": "¿Dónde se guarda la API Key?",
+        "faq.a1": "La API Key se almacena cifrada en la plataforma Ruvic y nunca se muestra en texto plano después de guardarla, ni se registra en logs. El conector la lee únicamente desde la variable de entorno RUVIC_PANOS_API_KEY en tiempo de ejecución.",
+        "faq.q2": "¿Con qué frecuencia debo rotar la API Key?",
+        "faq.a2": "Se recomienda rotarla cada 90 días, o inmediatamente si sospechas que se expuso. Genera una nueva con keygen usando la cuenta ruvic_admin y actualízala en el formulario de configuración; la anterior deja de funcionar en cuanto la cuenta genera una nueva clave.",
+        "faq.q3": "Sospecho que la API Key se comprometió, ¿qué hago?",
+        "faq.a3": "Revoca el acceso deshabilitando o eliminando la cuenta ruvic_admin en Device → Administrators del firewall, genera una nueva cuenta y API Key, actualiza la configuración en Ruvic, y revisa el historial de commits y el log de auditoría del firewall en busca de cambios no reconocidos.",
+        "faq.q4": "¿Por qué nunca se otorga el rol Superuser?",
+        "faq.a4": "El conector solo necesita leer reglas, escribir objetos de dirección y confirmar cambios. El rol Superuser otorgaría control total del firewall (interfaces, rutas, VPNs, usuarios, etc.), muy por encima de lo necesario. Si la API Key se filtrara, un rol personalizado con permisos mínimos limita drásticamente el daño posible frente a una cuenta Superuser comprometida.",
+        "faq.q5": "¿El conector puede crear o modificar reglas de seguridad?",
+        "faq.a5": "No. El conector solo lee reglas de seguridad, crea objetos de dirección y confirma (commit) cambios ya presentes en la configuración candidata. No expone ninguna operación para crear, modificar o eliminar reglas.",
+        "faq.callout_title": "add_object y commit hacen cambios reales",
+        "faq.callout_body": "A diferencia de una simple consulta, add_object modifica la configuración candidata del firewall y commit la aplica a la configuración activa, afectando tráfico real de producción. Confirma siempre con el equipo responsable antes de pedirle al agente que haga commit, especialmente en firewalls de producción.",
+      },
+      en: {
+        doc_title: "Palo Alto PAN-OS Connector — Ruvic",
+        toc_title: "Contents",
+        "toc.que_es": "What it is and what it's for",
+        "toc.prerrequisitos": "Prerequisites",
+        "toc.configuracion_fabricante": "Vendor / provider setup",
+        "toc.permisos": "Required permissions",
+        "toc.configuracion_ruvic": "Configuration in Ruvic",
+        "toc.verificacion": "Verification",
+        "toc.solucion_problemas": "Troubleshooting",
+        "toc.faq_seguridad": "FAQ and security notes",
+        guide_title: "Palo Alto PAN-OS Connector",
+        "section.que_es": "What it is and what it's for",
+        "section.que_es.body1": "The Palo Alto PAN-OS connector lets the Ruvic agent manage a Palo Alto firewall (or Panorama) through its API: query security rules, add address objects, and commit pending configuration changes. It combines the REST API (JSON) for rules and objects with the classic XML API for commit, since PAN-OS does not expose an equivalent REST endpoint.",
+        "section.que_es.body2": "Once configured, you can ask the agent things like:",
+        "section.que_es.example1": "\"List the security rules in vsys1 and tell me which ones allow traffic from the internet.\"",
+        "section.que_es.example2": "\"Add an address object for server 10.0.0.5/32 and commit it.\"",
+        "section.que_es.example3": "\"Which rules use the servidor-web object?\"",
+        "section.que_es.body3": "Supported operations:",
+        "table.operacion": "Operation",
+        "table.que_hace": "What it does",
+        "section.que_es.op1": "Lists the security rules of the configured vsys (read-only)",
+        "section.que_es.op2": "Adds an address object to the candidate configuration (no effect until commit)",
+        "section.que_es.op3": "Commits the pending changes to the firewall's active configuration",
+        "section.que_es.callout_title": "This connector makes real changes",
+        "section.que_es.callout_body": "Unlike a read-only connector, add_object and commit modify the firewall's configuration. A commit applies changes to the active configuration and can affect real production traffic. The connector does not create, modify, or delete security rules — only address objects and the commit of changes already present in the candidate configuration.",
+        "section.prerrequisitos": "Prerequisites",
+        "section.prerrequisitos.item1": "A Palo Alto PAN-OS firewall (or Panorama) reachable over HTTPS, PAN-OS 10.1 or later recommended.",
+        "section.prerrequisitos.item2": "Administrative access to the firewall (Device → Admin Roles and Device → Administrators) to create a role and a dedicated account, only during initial setup.",
+        "section.prerrequisitos.item3": "Network access from the Ruvic platform to the firewall's management interface (port 443 reachable; firewall rule if applicable).",
+        "section.prerrequisitos.item4": "The base URL of the firewall or Panorama (e.g. https://firewall.company.com) and, if applicable, the name of the VSYS to manage.",
+        "section.configuracion_fabricante": "Vendor / provider setup",
+        "section.configuracion_fabricante.intro": "You will create a custom administrator role and a dedicated account for Ruvic. Do not reuse the default administrator or an account with the Superuser role: a dedicated account with minimal permissions lets you audit the agent's activity and limits the impact if the API Key is compromised.",
+        "step.1.label": "Create the custom administrator role.",
+        "step.1.body": "Go to Device → Admin Roles → Add. Create a role (e.g. ruvic_panos_role) of type XML API/REST API and set the permissions exactly as follows:",
+        "step.1.sub1": "Read Only over Policies (needed for list_rules).",
+        "step.1.sub2": "Read-Write only over Objects → Addresses (needed for add_object). Leave the rest of \"Objects\" with no access or read-only.",
+        "step.1.sub3": "Commit permission enabled (needed for commit).",
+        "step.1.sub4": "No write access over Network, Device Setup, or any other section. Never use the Superuser role.",
+        "img.rol.placeholder": "[ Screenshot: Device → Admin Roles with the minimal permissions configured — replace with assets/img/panos-admin-role.png ]",
+        "step.2.label": "Create the dedicated administrator account.",
+        "step.2.body": "Go to Device → Administrators → Add, create a user (e.g. ruvic_admin) with a strong password (16+ random characters) and assign it the custom role created in the previous step as Administrator Type → Role Based.",
+        "step.3.label": "Generate the API Key with the keygen endpoint.",
+        "step.3.body": "Using the dedicated account (not the default admin), generate the API Key by calling the XML API's keygen endpoint:",
+        "step.3.body2": "The response includes a <key> element: copy it, you will use it in Ruvic's form (API Key field). Store it somewhere secure; never share it or paste it into unencrypted channels.",
+        "step.4.label": "Verify the account and the API Key.",
+        "step.4.body": "Confirm the API Key works and the role has the expected permissions by testing a read-only call:",
+        "step.4.body2": "If it responds with system information (no authentication error), the vendor side is ready. Write down the base URL, the API Key, and the VSYS for the next section.",
+        "section.permisos": "Required permissions",
+        "section.permisos.intro": "Least-privilege principle: the Ruvic account only needs these permissions. Do not grant the Superuser role or write access over Policies, Network, or Device Setup.",
+        "table.permiso": "Permission",
+        "table.para_que": "What it's for",
+        "permisos.row1.permiso": "Policies — Read Only",
+        "permisos.row1.para_que": "Query security rules (list_rules). Does not allow creating, modifying, or deleting rules.",
+        "permisos.row2.permiso": "Objects → Addresses — Read-Write",
+        "permisos.row2.para_que": "Create address objects in the candidate configuration (add_object). No write access is granted over other object types.",
+        "permisos.row3.permiso": "Commit",
+        "permisos.row3.para_que": "Apply the candidate configuration to the firewall's active configuration (commit).",
+        "permisos.callout_title": "Never grant Superuser",
+        "permisos.callout_body": "The Superuser role (or any role with write access over Network or Device Setup) would give the API Key the ability to reconfigure interfaces, routes, or the firewall itself — far beyond what the connector needs. If the role has more permissions than listed here, reduce it before continuing.",
+        "section.configuracion_ruvic": "Configuration in Ruvic",
+        "section.configuracion_ruvic.intro": "Go to Settings → Connectors, find the Palo Alto PAN-OS card and click Configure. Fill in the form with the values obtained in the previous section:",
+        "table.campo": "Field",
+        "table.descripcion": "Description",
+        "ruvic.field.base_url": "Base URL of the firewall or Panorama, including https:// (e.g. https://firewall.company.com). Required.",
+        "ruvic.field.api_key": "API Key generated in step 3 of the vendor setup, using the dedicated ruvic_admin account. Stored encrypted. Required.",
+        "ruvic.field.vsys": "VSYS to manage. Optional; defaults to vsys1. Change it if your firewall uses multiple virtual systems and you want to scope the connector to one.",
+        "ruvic.field.verify_ssl": "Verify the firewall's TLS certificate. Optional; enabled by default (true). Disable it only for tests against a firewall with a self-signed certificate in a lab environment — never in production, since it disables server validation and exposes the connection to man-in-the-middle attacks.",
+        "ruvic.field.connect_timeout": "Connection timeout in seconds. Optional; defaults to 15.",
+        "section.configuracion_ruvic.save": "Save the form. Ruvic automatically runs a connection test (equivalent to a ping against the API) and confirms whether the configuration is valid.",
+        "section.verificacion": "Verification",
+        "verif.1.label": "Automatic connection test.",
+        "verif.1.body": "When you save the configuration, Ruvic queries the firewall's system information using the entered API Key. If the connector card switches to Configured, the connection and credentials are valid.",
+        "verif.2.label": "Test with the agent.",
+        "verif.2.body": "Ask the agent something simple and read-only, for example: \"List the firewall's security rules\". If the agent responds with the list of rules (name, action, source/destination), the connector works end to end.",
+        "verif.3.label": "Optional write test (with caution).",
+        "verif.3.body": "Only if you want to validate the full flow: ask the agent to create a test address object and then explicitly confirm that it should commit the change. Remember commit affects the active configuration; do this on a lab firewall if possible.",
+        "verif.callout_title": "What to expect from each operation",
+        "verif.callout_body": "list_rules is immediate and read-only. add_object modifies the candidate configuration with no immediate effect. commit can take up to 2 minutes: the connector polls the job status every 3 seconds and returns the final result (OK or FAIL).",
+        "section.solucion_problemas": "Troubleshooting",
+        "table.problema": "Issue",
+        "table.causa_solucion": "Likely cause and fix",
+        "trouble.row1.problema": "Invalid API Key or insufficient permission (code 403 / 16)",
+        "trouble.row1.solucion": "The API Key is wrong, expired, or the account's role lacks the minimal permissions (Policies Read Only, Objects → Addresses Read-Write, Commit). Regenerate the API Key with keygen and review the role under Device → Admin Roles.",
+        "trouble.row2.problema": "Network timeout / could not reach the firewall",
+        "trouble.row2.solucion": "The Ruvic platform cannot reach base_url on port 443. Check firewall rules, that the management interface has HTTPS enabled, and increase connect_timeout if the network is slow.",
+        "trouble.row3.problema": "Commit fails or returns FAIL",
+        "trouble.row3.solucion": "There may be a validation error in the candidate configuration, another commit in progress, or the account lacks Commit permission. Check the job detail in the firewall's Task Manager and confirm the role's Commit permission.",
+        "trouble.row4.problema": "The card stays \"Not configured\" after saving",
+        "trouble.row4.solucion": "The automatic connection test failed. Check that base_url includes https://, that the API Key was copied in full (no spaces), and that verify_ssl matches the firewall's certificate type (disable it only if self-signed and you are testing).",
+        "trouble.row5.problema": "Invalid or unexpected XML response from PAN-OS",
+        "trouble.row5.solucion": "Usually indicates a PAN-OS version different from the expected one (REST API v10.1), or a proxy/load balancer altering the response. Verify the PAN-OS version and that base_url points directly to the firewall or Panorama, not to an intermediate proxy.",
+        "section.faq_seguridad": "FAQ and security notes",
+        "faq.q1": "Where is the API Key stored?",
+        "faq.a1": "The API Key is stored encrypted in the Ruvic platform and is never shown in plain text after saving, nor logged. The connector reads it only from the RUVIC_PANOS_API_KEY environment variable at runtime.",
+        "faq.q2": "How often should I rotate the API Key?",
+        "faq.a2": "Rotate it every 90 days, or immediately if you suspect exposure. Generate a new one with keygen using the ruvic_admin account and update it in the configuration form; the old one stops working as soon as the account generates a new key.",
+        "faq.q3": "I suspect the API Key was compromised, what should I do?",
+        "faq.a3": "Revoke access by disabling or deleting the ruvic_admin account under Device → Administrators on the firewall, create a new account and API Key, update the configuration in Ruvic, and review the firewall's commit history and audit log for unrecognized changes.",
+        "faq.q4": "Why is the Superuser role never granted?",
+        "faq.a4": "The connector only needs to read rules, write address objects, and commit changes. The Superuser role would grant full control of the firewall (interfaces, routes, VPNs, users, etc.), far beyond what's needed. If the API Key leaked, a custom role with minimal permissions drastically limits the possible damage compared to a compromised Superuser account.",
+        "faq.q5": "Can the connector create or modify security rules?",
+        "faq.a5": "No. The connector only reads security rules, creates address objects, and commits changes already present in the candidate configuration. It does not expose any operation to create, modify, or delete rules.",
+        "faq.callout_title": "add_object and commit make real changes",
+        "faq.callout_body": "Unlike a simple query, add_object modifies the firewall's candidate configuration and commit applies it to the active configuration, affecting real production traffic. Always confirm with the responsible team before asking the agent to commit, especially on production firewalls.",
+      },
+    };
+    /* El portal aplica el idioma del usuario (localStorage ruvic-docs-lang)
+       y actualiza [data-i18n], [data-i18n-placeholder] y [data-i18n-alt]. */
+  </script>
+</body>
+</html>
