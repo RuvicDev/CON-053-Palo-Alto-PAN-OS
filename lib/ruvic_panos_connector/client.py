@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 import xml.etree.ElementTree as ET
 from typing import Any
+from xml.sax.saxutils import escape as _xml_escape
 
 import requests
 import urllib3
@@ -28,6 +29,12 @@ from .logging_utils import get_logger
 _REST_API_VERSION = "v10.1"
 _COMMIT_POLL_INTERVAL = 3
 _COMMIT_MAX_WAIT = 120
+
+
+def _require_str(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise PanosDataError(f"{field} debe ser un string, no {type(value).__name__}.")
+    return value
 
 
 class PanosClient:
@@ -160,8 +167,8 @@ class PanosClient:
             >>> client.add_object("servidor-web", "10.0.0.5/32")
             {'@name': 'servidor-web', ...}
         """
-        name = (name or "").strip()
-        ip = (ip or "").strip()
+        name = _require_str(name, "name").strip()
+        ip = _require_str(ip, "ip").strip()
         if not name or not ip:
             raise PanosDataError("name e ip no pueden estar vacíos.")
         body = {"entry": {"@name": name, "ip-netmask": ip, "description": description}}
@@ -192,7 +199,8 @@ class PanosClient:
             >>> client.commit("Agregado objeto servidor-web")
             {'job_id': '123', 'status': 'FIN', 'result': 'OK'}
         """
-        cmd = f"<commit><description>{description}</description></commit>"
+        description = _require_str(description, "description")
+        cmd = f"<commit><description>{_xml_escape(description)}</description></commit>"
         root = self._xml_request({"type": "commit", "cmd": cmd})
         job_el = root.find(".//job")
         if job_el is None:
